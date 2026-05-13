@@ -1,0 +1,45 @@
+substitutions:
+  light_status_url_primary: "http://svitlolightbot.mooo.com:8080/channelPing"
+  light_status_url_fallback: "http://141.148.245.165:8080/channelPing"
+
+globals:
+  - id: light_status_use_fallback
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+script:
+  - id: !extend site_ping
+    then:
+      - logger.log: "Light Status API..."
+      - script.execute: light_status_ping
+      - script.wait: light_status_ping
+
+  - id: light_status_ping
+    then:
+      - if:
+          condition:
+            and:
+              - wifi.connected:
+              - lambda: 'return id(svitlobot_key).has_state();'
+          then:
+            - http_request.get:
+                url: !lambda |-
+                  std::string url = id(light_status_use_fallback) ? "${light_status_url_fallback}" : "${light_status_url_primary}";
+                  return (url + "?channel_key=" + id(svitlobot_key).state).c_str();
+                capture_response: false
+                on_response:
+                  then:
+                    - lambda: |-
+                        if (response->status_code == 200 && id(light_status_use_fallback)) {
+                          ESP_LOGI("LightStatus", "Fallback IP successful, switching back to domain");
+                          id(light_status_use_fallback) = false;
+                        }
+                on_error:
+                  then:
+                    - lambda: |-
+                        if (!id(light_status_use_fallback)) {
+                          ESP_LOGW("LightStatus", "Domain failed, switching to fallback IP");
+                          id(light_status_use_fallback) = true;
+                        }
+    mode: single
